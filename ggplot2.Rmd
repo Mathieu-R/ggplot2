@@ -21,8 +21,9 @@ knitr::opts_chunk$set(
 )
 ```
 
-```{r}
+```{r, include=FALSE}
 library(tidyverse)
+library(DT)
 library(kableExtra)
 library(patchwork)
 
@@ -65,7 +66,11 @@ Voici un aperçu des données :
 
 ```{r}
 MenRG_Final |>
-  DT::datatable()
+  select(c("P1DistanceRun", "PointNumber", "PointServer", "PointWinner", "ServeDepth", "ServeNumber", "ServeWidth", "Speed_KMH")) |>
+  datatable(
+    rownames = FALSE,
+    options = list(pageLength = 20)
+  )
 ```
 
 # Comparaison des vitesses de service entre les serveurs
@@ -78,40 +83,39 @@ Pour cela, on peut regarder les principaux quantiles, la moyenne et l'écart-typ
 ```
 
 ```{r}
-p1 <- ggplot(
-  MenRG_Final %>% filter(PointWinner == "Rafael Nadal"), 
-  aes(x = PointServer, P1DistanceRun)
-) +
-  geom_boxplot(aes(fill = ServeNumber)) +
-  labs(
-    title = "Nadal a gagné le point"
-  )
-
-p2 <- ggplot(
-  MenRG_Final %>% filter(PointWinner == "Stan Wawrinka"), 
-  aes(x = PointServer, P1DistanceRun)
-) +
-  geom_boxplot(aes(fill = ServeNumber)) + 
-  labs(
-    title = "Wawrinka a gagné le point",
+ggplot(
+  MenRG_Final, 
+  aes(x = PointServer, y = P1DistanceRun)
   ) +
-  theme(
-    axis.text.y = element_blank(),
-    axis.ticks.y = element_blank()
-  )
-
-(p1 + p2) + plot_layout(guides = "collect") & ylim(0, 60) & theme(legend.position = "top") & labs(x = "Serveur", y = "Distance Parcourue")
+  geom_boxplot(aes(fill = ServeNumber)) + 
+  scale_fill_discrete(labels = c("Premier service", "Deuxième service")) +
+  facet_wrap(~ PointWinner, labeller = labeller(
+    PointWinner = c(
+      "Rafael Nadal" = "Rafael Nadal a gagné ce point",
+      "Stan Wawrinka" = "Stan Wawrinka a gagné ce point"
+    )
+  )) + 
+  labs(
+    x = "Serveur",
+    y = "Distance Parcourue",
+    fill = NULL
+  ) + 
+  theme(legend.position = "top")
 ```
 
 ## Vainqueur du point en fonction du serveur
 
 ```{r}
 tb_prop <- xtabs(data = MenRG_Final, formula = ~ PointWinner + PointServer) |>
-  proportions() |>
+  proportions(margin = 2) |>
   as.data.frame()
 
-ggplot(tb_prop, aes(x = PointServer, y = Freq * 100)) +
-  geom_bar(aes(x = PointServer, fill = PointWinner), position = "fill") +
+ggplot(
+  tb_prop, 
+  aes(x = PointServer, y = Freq * 100, fill = PointWinner)
+  ) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_discrete(name = "Vainqueur du point") +
   labs(
     x = "Serveur",
     y = "Pourcentage de points gagnés"
@@ -120,9 +124,9 @@ ggplot(tb_prop, aes(x = PointServer, y = Freq * 100)) +
 
 # Uniquement pour `r params$Player`
 
-_Remarque : Le nom du joueur vient d’une commande R._
+*Remarque : Le nom du joueur vient d'une commande R.*
 
-On sélectionne les lignes uniquement telles que le serveur est l’un des deux joueurs et telles que `ServeWidth != "" & ServeDepth != ""`. Ici, on le fait pour Rafael Nadal.
+On sélectionne les lignes uniquement telles que le serveur est l'un des deux joueurs et telles que `ServeWidth != "" & ServeDepth != ""`. Ici, on le fait pour Rafael Nadal.
 
 ```{r}
 MenRG_Final_filtered <- MenRG_Final |>
@@ -132,29 +136,105 @@ MenRG_Final_filtered <- MenRG_Final |>
 
 ## Evolution au cours du match
 
-Pour savoir s’il y a une évolution de la vitesse, on réalise un _scatter plot_ représentant la vitesse du service en fonction du nombre de points. On sépare les premier et deuxième services.
+Pour savoir s'il y a une évolution de la vitesse, on réalise un *scatter plot* représentant la vitesse du service en fonction du nombre de points. On sépare les premier et deuxième services.
 
 ```{r}
-ggplot(MenRG_Final_filtered, aes(x = PointNumber, y = Speed_KMH, col = ServeNumber, shape = ServeNumber)) +
+ggplot(
+  MenRG_Final_filtered, 
+  aes(x = PointNumber, y = Speed_KMH, color = ServeNumber, shape = ServeNumber)
+  ) +
   geom_point() +
-  geom_smooth(method = "lm", aes(col = ServeNumber)) +
-  #stat_function(fun = mean, aes(y = Speed_KMH, col = ServeNumber)) +
-  scale_color_discrete(c("Premier service" = "red", "Deuxième service" = "blue")) +
+  geom_smooth(method = "loess") +
+  geom_hline(
+    data = aggregate(Speed_KMH ~ ServeNumber, data = MenRG_Final_filtered, FUN = mean),
+    aes(yintercept = Speed_KMH, color = ServeNumber),
+    linetype = "dashed"
+  ) +
+  scale_color_manual(
+    name = "",
+    labels = c("Premier service", "Deuxième service"),
+    values = c("First serve" = "red", "Second serve" = "blue")
+  ) +
+  scale_shape_manual(
+    name = NULL,
+    labels = NULL,
+    values = c("First serve" = 1, "Second serve" = 2)
+  ) +
   labs(
     x = "Numéro du point",
     y = "Vitesse de service en km/h"
   )
 ```
 
-_Remarques : La droite horizontale est la moyenne des premier et deuxième services respectivement, l’autre est une régression locale (loess). et la phrase sous la figure est un caption qui dépend du nom du joueur._
+*Remarques : La droite horizontale est la moyenne des premier et deuxième services respectivement, l'autre est une régression locale (loess). et la phrase sous la figure est un caption qui dépend du nom du joueur.*
 
 ```{r}
-m.speed <- mean(MenRG_Final_filtered$Speed_KMH)
-sd.speed <- sd(MenRG_Final_filtered$Speed_KMH)
+m.speed <- aggregate(Speed_KMH ~ ServeNumber, data = MenRG_Final_filtered, FUN = mean)
+sd.speed <- aggregate(Speed_KMH ~ ServeNumber, data = MenRG_Final_filtered, FUN = sd)
 
-p1 <- ggplot(MenRG_Final_filtered, aes(x = Speed_KMH)) +
-  geom_bar(aes(y = ..density..), fill = "gray", col = "black") +
-  stat_function(fun = dnorm, aes(y = Speed_KMH), args = list(mean = m.speed, sd = sd.speed))
+p1 <- ggplot(
+    MenRG_Final_filtered, 
+    aes(x = Speed_KMH, color = ServeNumber)
+  ) +
+  geom_histogram(
+    aes(y = ..density..),
+    position = "identity", 
+    fill = "gray",
+    col = "black"
+  ) +
+  geom_density(
+    aes(x = Speed_KMH, y = ..density.., color = ServeNumber)
+  ) +
+  scale_color_manual(
+    name = "Service",
+    labels = c("Premier", "Deuxième"),
+    values = c("First serve" = "red", "Second serve" = "blue")
+  ) +
+  labs(
+    x = "Vitesse en km/h",
+    y = "Densité"
+  )
 
-p1
+p2 <- ggplot(
+    MenRG_Final_filtered,
+    aes(x = Speed_KMH)
+  ) + 
+  geom_boxplot(
+    aes(fill = ServeNumber)
+  ) +
+  scale_fill_manual(
+    name = "",
+    labels = NULL,
+    values = c("First serve" = "red", "Second serve" = "blue")
+  ) + 
+  labs(
+    x = "Vitesse en km/h",
+    fill = NULL
+  )
+
+tb_prop2 <- xtabs(
+  data = MenRG_Final_filtered, 
+  formula = ~ ServeWidth + ServeDepth
+) |> 
+  proportions() |>
+  as.data.frame()
+
+p3 <- ggplot(
+    tb_prop2,
+    aes(x = ServeWidth, y = Freq * 100)
+  ) + 
+  geom_bar(
+    aes(fill = ServeDepth),
+    stat = "identity"
+  ) +
+  labs(
+    x = NULL,
+    y = "Pourcentage",
+    fill = NULL
+  ) + 
+  theme(
+    legend.position = "bottom"
+  )
+
+(p1 + p2) / p3
 ```
